@@ -1,0 +1,7 @@
+tqdm
+ipywidgets
+
+pandas
+matplotlib
+
+markdown

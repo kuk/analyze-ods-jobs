@@ -23,6 +23,30 @@ import html_text as html_text_
 
 import langdetect
 
+from yargy import (
+    Parser,
+    rule,
+    or_, and_
+)
+from yargy.pipelines import (
+    caseless_pipeline,
+    morph_pipeline
+)
+from yargy.predicates import (
+    caseless,
+    eq, in_,
+    lte, length_eq
+)
+from yargy.interpretation import (
+    fact,
+)
+from yargy import interpretation
+
+from ipymarkup import (
+    show_span_box_markup as show_markup
+)
+
+
 DATA_DIR = Path('data')
 DUMPS_DIR = DATA_DIR / 'dumps'
 DUMP = DUMPS_DIR / '2022-01-17.zip'
@@ -292,4 +316,571 @@ DASH_TRANS = trans_table(
 
 def norm_text(text):
     return text.translate(DASH_TRANS)
+
+
+########
+#
+#   VILKA
+#
+######
+
+
+Bound = fact(
+    'Bound',
+    ['amount', 'currency', 'scale', 'tax']
+)
+Vilka = fact(
+    'Vilka',
+    ['min', 'max']
+)
+
+
+@dataclass
+class NormVilka:
+    min: int
+    max: int
+    currency: str
+    tax: str
+
+
+def norm_vilka(record):
+    min, max = record
+    currency = min.currency or max.currency or RUB
+    tax = min.tax or max.tax or NET
+    scale = min.scale or max.scale
+
+    min, max = min.amount, max.amount
+    if scale:
+        min *= scale
+        max *= scale
+    else:
+        if 20 <= min <= 600:
+            min *= K
+            max *= K
+
+    return NormVilka(min, max, currency, tax)
+
+
+def is_ok_vilka(record):
+    if record.min >= record.max:
+        return
+
+    if record.currency == RUB:
+        min, max = 20_000, 600_000
+    elif record.currency in (USD, EUR, GBP):
+        min, max = 1000, 10000
+
+    return record.min >= min and record.max <= max
+
+
+NET = 'net'
+GROSS = 'gross'
+
+RUB = 'rub'
+USD = 'usd'
+EUR = 'eur'
+GBP = 'gbp'
+
+K = 1000
+M = 1_000_000
+
+TAXES = {
+    'gross': GROSS,
+    'net': NET,
+    'гросс': GROSS,
+    'грязными': GROSS,
+    'до НДФЛ': GROSS,
+    'до вычета НДФЛ': GROSS,
+    'до налогов': GROSS,
+    'на руки': NET,
+    'нетто': NET,
+    'после НДФЛ': NET,
+    'после вычета НДФЛ': NET,
+    'после налогов': NET,
+    'чистыми': NET,
+}
+
+TAX = caseless_pipeline(TAXES).interpretation(
+    interpretation.normalized().custom(TAXES.get)
+)
+
+PER = caseless_pipeline([
+    '/mo',
+    '/мес',
+    '/месяц',
+    'per month',
+    'в мес',
+    'в месяц',
+    '/month',
+])
+
+SCALES = {
+    'k': K,
+    'к': K,
+    'т': K,
+    'т.': K,
+    'тыс': K,
+    'тыс.': K,
+    'тысяч': K,
+
+    'm': M,
+    'м': M,
+    'млн': M,
+    'млн.': M,
+}
+
+SCALE = caseless_pipeline(SCALES).interpretation(
+    interpretation.normalized().custom(SCALES.get)
+)
+
+CURRENCIES = {
+    'р': RUB,
+    'р.': RUB,
+    'руб': RUB,
+    'руб.': RUB,
+    'рубл': RUB,
+    'рублей': RUB,
+    'рос. руб.': RUB,
+    '₽': RUB,
+    'RUR': RUB,
+
+    '$': USD,
+    '$$': USD,
+    'USD': USD,
+    'долларов': USD,
+
+    '€': EUR,
+    'eur': EUR,
+    'euro': EUR,
+    'евро': EUR,
+
+    '£': GBP,
+}
+
+CURRENCY = caseless_pipeline(CURRENCIES).interpretation(
+    interpretation.normalized().custom(CURRENCIES.get)
+)
+
+SEP = in_('.,')
+
+
+def norm_int(value):
+    value = re.sub(r'[\s,\.]', '', value)
+    return int(value)
+
+
+INT = or_(
+    rule(lte(1_000_000)),
+    rule(
+        lte(999),
+        SEP.optional(),
+        and_(
+            lte(999),
+            length_eq(3)
+        )
+    )
+).interpretation(
+    interpretation.custom(norm_int)
+)
+
+
+def norm_float(value):
+    value = value.replace(' ', '')
+    value = value.replace(',', '.')
+    return float(value)
+
+
+FLOAT = rule(
+    lte(10),
+    SEP,
+    lte(100)
+).interpretation(
+    interpretation.custom(norm_float)
+)
+
+APPROX = eq('~')
+PLUS = eq('+')
+
+NUM = or_(
+    INT,
+    FLOAT
+)
+
+ATTR = or_(
+    SCALE.interpretation(Bound.scale),
+    CURRENCY.interpretation(Bound.currency),
+    PER,
+    TAX.interpretation(Bound.tax),
+)
+
+AMOUNT = rule(
+    APPROX.optional(),
+    NUM.interpretation(Bound.amount),
+    PLUS.optional()
+)
+
+BOUND = rule(
+    CURRENCY.optional().interpretation(Bound.currency),
+    AMOUNT,
+    ATTR.repeatable(max=4).optional()
+).interpretation(
+    Bound
+)
+
+OT = caseless('от')
+
+DO = caseless('до')
+
+DASH = eq('-')
+
+MIN = BOUND.interpretation(Vilka.min)
+
+MAX = BOUND.interpretation(Vilka.max)
+
+VILKA = or_(
+    rule(
+        OT, MIN,
+        DO, MAX
+    ),
+    rule(
+        MIN,
+        DASH,
+        MAX
+    )
+).interpretation(
+    Vilka
+)
+
+VILKA_TESTS = [
+    # AndreyKolomiets/ods_jobs_analytics
+    'от 60К до 300К грязными',
+    'от 60к до 300к gross',
+    '120т.р. - 160 т.р. чистыми',
+    '$5k-$8k',
+    '150-250 т.р.',
+    '2.5-4.5k USD',
+    '2.5-4.5k $',
+    '2.5-4.5k$',
+    '1K - 2K EUR нетто ',
+    '1K - 2K € нетто ',
+    '1K - 2K€ нетто ',
+    '€1K - €2K EUR нетто ',
+    '1K - 2K € нетто ',
+    '1000 - 2000 € нетто ',
+    'от 150 до 250 гросс',
+    '130-200к руб.',
+    'от 200К до 1М рублей',
+    '60 000 - 120 000 т.р. net',
+    'от 3,4 до 4,8 млн.рублей',
+    '280-400+ тысяч рублей',
+    '$$1000-5000',
+    '1000-2500k USD',
+    'от $ 800 до 1100 net',
+
+    # Вилка:
+    '100-160к',
+    '40 - 100',
+    '180-450 т. руб.',
+    '90 000 ₽ - 120 000 ₽ net',
+
+    # TODO Shilo
+    # TODO Per hour
+
+    # 'от 150к Net',
+    # 'junior 75k руб.- senior 200к руб',
+    # 'До 200K USD/год net',
+    # 'Стартовая ЗП 2,300€',
+    # 'от 80 тыс. руб. на руки, верхнюю границу не указываю',
+    # 'до 100 тыс.рублей',
+
+    # '1000-1500р/ч на руки',
+
+    # '100-150 тр gross',
+    # '5-6 килобаксов',
+    # '80-130кк.',
+    # '100-200круб/мес',
+]
+
+
+######
+#
+#   LOCATION
+#
+#####
+
+
+Location = fact(
+    'Location',
+    ['city', 'metro', 'remote']
+)
+
+
+MSK = 'Москва'
+SPB = 'Санкт-Петербург'
+
+CITIES = {
+    'Москва': MSK,
+    'default-city': MSK,
+    'Moscow': MSK,
+
+    'Санкт-Петербург': SPB,
+    'Петербург': SPB,
+    'СПб': SPB,
+
+    'Новосибирск': 'Новосибирск',
+    'Уфа': 'Уфа',
+    'Иннополис': 'Иннополис',
+
+    'Минск': 'Минск',
+    'Minsk': 'Минск',
+
+    'Киев': 'Киев',
+    'Kiev': 'Киев',
+
+    'Амстердам': 'Амстердам',
+    'Amsterdam': 'Амстердам',
+
+    'Лондон': 'Лондон',
+    'London': 'Лондон',
+
+    'New York': 'Нью-Йорк'
+}
+
+CITY = morph_pipeline(CITIES).interpretation(
+    interpretation.normalized().custom(CITIES.get)
+)
+
+METROS = [
+    'Павелецкая',
+    'Октябрьская',
+    'Шаболовская',
+    'Водный Стадион',
+    'Выставочная',
+    'Кутузовская',
+    'Белорусская',
+    'Аэропорт',
+    'Динамо',
+    'Таганская',
+]
+
+METRO = morph_pipeline(METROS).interpretation(
+    interpretation.normalized()
+)
+
+REMOTE = morph_pipeline([
+    'Удаленно',
+    'Удаленка',
+    'Remote',
+
+    'удаленный',
+])
+
+LOCATION = or_(
+    CITY.interpretation(Location.city),
+    METRO.interpretation(Location.metro),
+    REMOTE.interpretation(Location.remote.const(True))
+).interpretation(Location)
+
+
+#######
+#
+#   POSITION
+#
+#####
+
+
+Position = fact(
+    'Position',
+    ['grade', 'title']
+)
+
+
+INTERN = 'intern'
+JUNIOR = 'junior'
+MIDDLE = 'middle'
+SENIOR = 'senior'
+LEAD = 'lead'
+
+DS = 'DS'
+DA = 'DA'
+DE = 'DE'
+RESEARCHER = 'researcher'
+ANALYST = 'analyst'
+DEV = 'dev'
+
+GRADES = {
+    'Стажер': INTERN,
+
+    'Юниор': JUNIOR,
+    'Младший': JUNIOR,
+    'Джун': JUNIOR,
+    'Jun': JUNIOR,
+    'Junior': JUNIOR,
+
+    'Мидл': MIDDLE,
+    'Mid': MIDDLE,
+    'Middle': MIDDLE,
+
+    'Старший': SENIOR,
+    'Сеньор': SENIOR,
+    'Синьёр': SENIOR,
+    'Senior': SENIOR,
+
+    'Лид': LEAD,
+    'Chief': LEAD,
+    'Head': LEAD,
+    'Lead': LEAD,
+    'Team Lead': LEAD,
+    'Tech Lead': LEAD,
+}
+
+GRADE = morph_pipeline(GRADES).interpretation(
+    interpretation.normalized().custom(GRADES.get)
+)
+
+TITLES = {
+    'DS': DS,
+    'Data Scientist': DS,
+    'Data Science': DS,
+
+    'Data Analyst': DA,
+    'Аналитик данных': DA,
+
+    'Analyst': ANALYST,
+    # 'Аналитик': ANALYST,
+    'бизнес-аналитик': ANALYST,
+    'Product Analytics': ANALYST,
+    'Бизнес аналитик': ANALYST,
+    'Product Analyst': ANALYST,
+
+    'Big Data Engineer': DE,
+    'DS-инженер': DE,
+    'Data Engineer': DE,
+    'Data-Engineer': DE,
+    'Deep Learning Engineer': DE,
+    'ML Engineer': DE,
+    'ML-Engineer': DE,
+    'ML-инженер': DE,
+    'Machine Learning Engineer': DE,
+    'СV Engineer': DE,
+    'CV Engineer': DE,
+    'NLP Engineer': DE,
+    'дата-инженер': DE,
+    'DL инженер': DE,
+    'DataOps Engineer': DE,
+    'ML разработчик': DE,
+    'ML-разработчик': DE,
+    'DL Engineer': DE,
+    'MLE': DE,
+    'AI Engineer': DE,
+    'Computer Vision Engineer': DE,
+
+    'Quantitative Researcher': RESEARCHER,
+    'ML Researcher': RESEARCHER,
+    'Researcher': RESEARCHER,
+
+    'Software Engineer': DEV,
+    'DevOps': DEV,
+    'MLOps': DEV,
+    'Python Developer': DEV,
+    'Software Developer': DEV,
+    'backend developer': DEV,
+    'python-разработчик': DEV,
+}
+
+TITLE = morph_pipeline(TITLES).interpretation(
+    interpretation.normalized().custom(TITLES.get)
+)
+
+POSITION = or_(
+    GRADE.interpretation(Position.grade),
+    TITLE.interpretation(Position.title)
+).interpretation(
+    Position
+)
+
+
+#######
+#
+#   EMAIL
+#
+####
+
+
+def find_emails(text):
+    matches = re.finditer(r'[a-z0-9\.]+@[a-z0-9.-]+\.[a-z]{2,7}', text, re.I)
+    for match in matches:
+        yield match.start(), match.end()
+
+
+def email_domain(email):
+    name, domain = email.split('@', 1)
+    return domain
+
+
+GENERIC_EMAIL_DOMAINS = {
+    'gmail.com',
+    'mail.ru',
+    'yandex.ru',
+    'mac.com',
+}
+
+
+def norm_domain(value):
+    value = value.lower()
+    if value.startswith('www.'):
+        value = value[4:]
+    return value
+
+
+#####
+#
+#   COMPANY
+#
+#######
+
+
+COMPANIES = {
+    'Yandex Data Factory': 'yandex-team.ru',
+    'Фабрику данных Яндекса': 'yandex-team.ru',
+    'Яндекс': 'yandex-team.ru',
+    'Яндекс.Go': 'yandex-team.ru',
+    'Яндекс.Алиса': 'yandex-team.ru',
+    'Яндекс.Вертикали': 'yandex-team.ru',
+    'Яндекс.Дзен': 'yandex-team.ru',
+    'Яндекс.Маркет': 'yandex-team.ru',
+    'Яндекс.Погода': 'yandex-team.ru',
+    'Яндекс.Поиск': 'yandex-team.ru',
+    'Яндекс.Такси': 'yandex-team.ru',
+    
+    'Авито': 'avito.ru',
+    'Joom': 'joom.ru',
+    'Ozon': 'ozon.ru',
+    'OzonExpress': 'ozon.ru',
+
+    'SberCloud': 'sberbank.ru',
+    'SberDevices': 'sberbank.ru',
+    'SberGames': 'sberbank.ru',
+    'Сбер': 'sberbank.ru',
+    'СберТех': 'sberbank.ru',
+    'Сбербанк': 'sberbank.ru',
+
+    'HeadHunter': 'hh.ru',
+    'МТС': 'mts.ru',
+
+    'X5': 'x5.ru',
+    'ЛЕНТА': 'lenta.ru',
+    'Leroy Merlin': 'leroymerlin.ru',
+
+    'Тинькофф': 'tinkoff.ru',
+    'Tinkoff': 'tinkoff.ru',
+    'Райффайзенбанк': 'raiffeisen.ru',
+    'Альфа-Банк': 'alfabank.ru',
+    'банке Открытие': 'open.ru',
+}
+
+COMPANY = morph_pipeline(COMPANIES).interpretation(
+    interpretation.normalized().custom(COMPANIES.get)
+)
+
     )

@@ -1068,4 +1068,444 @@ class Extractor:
             for match in extractor(text):
                 yield match
 
+
+#######
+#
+#   PLOT
+#
+######
+
+
+OTHER = 'other'
+UNKNOWN = 'unknown'
+
+
+def patch_bar_year_ticks(ax):
+    minor, major = [], []
+    labels = []
+
+    for item in ax.get_xticklabels():
+        (position, _) = item.get_position()
+        label = item.get_text()
+        date = Datetime.fromisoformat(label)
+
+        if date.month == 1:
+            labels.append(str(date.year))
+            major.append(position)
+
+        if date.month in (1, 4, 7, 10):
+            minor.append(position)
+
+    ax.set_xticks(major, labels, rotation=0)
+    ax.set_xticks(minor, minor=True)
+
+
+def patch_legend(ax):
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(reversed(handles), reversed(labels), frameon=False)
+
+
+def drop_last_month(table):
+    last = table.index.max()
+    return table[table.index != last]
+
+
+######
+#   EVENTS
+#######
+
+
+def plot_events(events):
+    data = Counter()
+    for record in events:
+        data[record.datetime.date(), record.channel] += 1
+
+    table = pd.Series(data)
+    table = table.unstack()
+    table.index = pd.to_datetime(table.index)
+    table = table.resample('M').sum()
+    table = drop_last_month(table)
+
+    top = table.sum().sort_values(ascending=False).head(9)
+
+    other = table[[_ for _ in table.columns if _ not in top]]
+    other = other.sum(axis='columns')
+
+    table = table[top.index]
+    table[OTHER] = other
+
+    table = table.rename(columns={
+        # label of '_random_talks' which cannot be automatically added to the legend.
+        '_random_talks': '-random_talks',
+        '_jobs': '-jobs',
+        '_random_b': '-random_b',
+        OTHER: 'Другие'
+    })
+
+    fig, ax = plt.subplots()
+    table.plot(kind='bar', stacked=True, width=1, ax=ax)
+
+    patch_bar_year_ticks(ax)
+    patch_legend(ax)
+    fig.set_size_inches(12, 4)
+
+    ax.set_ylabel('# сообщений / месяц')
+
+
+#####
+#  CITY
+######
+
+
+def count_top_cities(message_matches):
+    counts = Counter()
+    for message, matches in message_matches:
+        cities = {
+            _.value.city
+            for _ in matches
+            if _.type == const.LOCATION
+            if _.value.city
+        }
+        for city in cities:
+            counts[city] += 1
+    return counts.most_common()
+
+
+def matches_city(matches):
+    values = [_.value for _ in matches if _.type == const.LOCATION]
+    if not values:
+        return UNKNOWN
+
+    if any(_.metro for _ in values):
+        return MSK
+
+    cities = {_.city for _ in values}
+    if not cities:
+        return UNKNOWN
+
+    if MSK in cities:
+        return MSK
+    elif SPB in cities:
+        return SPB
+    else:
+        return OTHER
+
+
+def plot_city(message_matches):
+    data = {}
+    for message, matches in message_matches:
+        type = matches_city(matches)
+        data[message.datetime] = type
+
+    table = pd.Series(data)
+    table = pd.get_dummies(table)
+    table = table.resample('M').sum()
+    table = drop_last_month(table)
+
+    table = table.reindex(columns=[MSK, SPB, OTHER, UNKNOWN])
+    table = table.rename(columns={
+        UNKNOWN: 'Не распарсилось + не указан',
+        OTHER: 'Минск + Киев + Лондон + другие',
+        SPB: 'Питер',
+        MSK: 'Москва'
+    })
+
+    fig, ax = plt.subplots()
+    table.plot(kind='bar', stacked=True, width=1, ax=ax)
+
+    ax.set_ylabel('# вакансий / месяц')
+    patch_bar_year_ticks(ax)
+    patch_legend(ax)
+
+
+#######
+#  REMOTE
+######
+
+
+def matches_remote(matches):
+    return any(
+        _.value.remote for _ in matches
+        if _.type == const.LOCATION
     )
+
+
+def plot_remote(message_matches):
+    data = {}
+    for message, matches in message_matches:
+        type = matches_remote(matches)
+        data[message.datetime] = type
+
+    table = pd.Series(data)
+    table = pd.get_dummies(table)
+    table = table.resample('M').sum()
+    table = drop_last_month(table)
+
+    table = table.reindex(columns=[True, False])
+    table = table.rename(columns={
+        False: 'Не распарсилось + офис',
+        True: 'Упоминается удалёнка',
+    })
+
+    fig, ax = plt.subplots()
+    table.plot(kind='bar', stacked=True, width=1, ax=ax)
+
+    ax.set_ylabel('# вакансий / месяц')
+    patch_bar_year_ticks(ax)
+    patch_legend(ax)
+
+
+########
+#   GRADE
+#####
+
+
+GRADES_ORDER = [
+    INTERN,
+    JUNIOR,
+    MIDDLE,
+    SENIOR,
+    LEAD,
+]
+
+
+def matches_grades(matches):
+    grades = set()
+    for match in matches:
+        if match.type == const.POSITION and match.value.grade:
+            grades.add(match.value.grade)
+
+    return sorted(
+        grades,
+        key=lambda _: GRADES_ORDER.index(_)
+    )
+
+
+def plot_grades(message_matches):
+    data = {}
+    for message, matches in message_matches:
+        city = matches_city(matches)
+        if city != MSK:
+            continue
+
+        grades = matches_grades(matches)
+        if not grades:
+            data[message.datetime] = UNKNOWN
+        else:
+            for grade in grades:
+                data[message.datetime] = grade
+
+    table = pd.Series(data)
+    table = pd.get_dummies(table)
+    table = table.resample('M').sum()
+    table = drop_last_month(table)
+
+    table = table.reindex(columns=GRADES_ORDER + [UNKNOWN])
+    table = table.rename(columns={
+        INTERN: 'Стажёр',
+        JUNIOR: 'Джун',
+        MIDDLE: 'Мид',
+        SENIOR: 'Синьёр',
+        LEAD: 'Лид',
+        UNKNOWN: 'Не распарсилось + не указано',
+
+    })
+    
+    fig, ax = plt.subplots()
+    table.plot(kind='bar', stacked=True, width=1, ax=ax)
+
+    ax.set_ylabel('# вакансий / месяц, Москва')
+    patch_bar_year_ticks(ax)
+    patch_legend(ax)
+
+
+#####
+#   VILKA
+######
+
+
+def matches_vilkas(matches):
+    # Dedup
+    min_vilkas = {}
+    for match in matches:
+        if match.type == const.VILKA:
+            vilka = match.value
+            min_vilkas[vilka.min] = vilka
+
+    return [
+        min_vilkas[_]
+        for _ in sorted(min_vilkas)
+    ]
+
+
+def minus_ndfl(value):
+    return (1 - 0.13) * value
+
+
+def month_start(date):
+    return date - Timedelta(date.day - 1)
+
+
+def plot_vilkas(message_matches):
+    first, _ = message_matches[0]
+    last, _ = message_matches[-1]
+    index = pd.date_range(
+        start=first.datetime,
+        end=last.datetime,
+        freq='MS'
+    )
+    date_xs = {
+        _.date(): index
+        for index, _ in enumerate(index)
+    }
+
+    GRADES = [JUNIOR, MIDDLE, SENIOR]
+    colors = {
+        JUNIOR: 'tab:blue',
+        MIDDLE: 'tab:orange',
+        SENIOR: 'tab:green'
+    }
+    titles = {
+        JUNIOR: 'Джун',
+        MIDDLE: 'Мидл',
+        SENIOR: 'Синьёр'
+    }
+    fig, axes = plt.subplots(1, len(GRADES))
+
+    for GRADE, ax in zip(GRADES, axes.flatten()):
+        data = defaultdict(list)
+        for message, matches in message_matches:
+            city = matches_city(matches)
+            if city != MSK:
+                continue
+
+            grades = matches_grades(matches)
+            vilkas = matches_vilkas(matches)
+
+            # Miss common case: "jun/mid/sen: 50-500k"
+            # Single vilka multiple grades
+            if len(grades) != len(vilkas):
+                continue
+
+            for vilka, grade in zip(vilkas, grades):
+                if grade != GRADE:
+                    continue
+            
+                # Only msk, non rub super rare
+                if vilka.currency != RUB:
+                    continue
+            
+                # By default assume net, "100-150k" -> net
+                # Gross is 25%, try convert to keep
+                # https://journal.tinkoff.ru/guide/grossnet/
+                min, max = vilka.min, vilka.max
+                if vilka.tax == GROSS:
+                    min = minus_ndfl(min)
+                    max = minus_ndfl(max)
+
+                date = message.datetime.date()
+                date = month_start(date)
+        
+                data[date].append([min, max])
+
+        for date, intervals in data.items():
+            for min, max in intervals:
+                if date not in date_xs:
+                    continue
+
+                ax.bar(
+                    x=date_xs[date],
+                    height=(max - min), bottom=min,
+                    color=colors[GRADE],
+                    width=1, alpha=0.1
+                )
+
+        ax.set_title(titles[GRADE])
+
+        ticks = list(date_xs.values())
+        labels = [_.isoformat() for _ in date_xs.keys()]
+        ax.set_xticks(ticks, labels=labels)
+        patch_bar_year_ticks(ax)
+        
+        # Scarse data before 2018, compact output
+        start = Datetime.fromisoformat('2018-06-01').date()
+        min = date_xs[start]
+        ax.set_xlim(min, None)
+
+        min, max = 25_000, 450_000
+        ticks = range(50_000, max, 50_000)
+        labels = [f'{_ // 1000}k' for _ in ticks]
+        ax.set_yticks(ticks, labels=labels)
+        ax.set_ylim(min, max)
+
+        if GRADE == JUNIOR:
+            ax.set_ylabel('Граница вилки, на руки, Москва')
+
+    fig.set_size_inches(4 * len(GRADES), 4)
+    fig.tight_layout()
+
+
+#######
+#   COMPANY
+######
+
+
+def matches_company(matches):
+    counts = Counter()
+    for match in matches:
+        if match.type == const.COMPANY:
+            counts[match.value] += 1
+
+    if counts:
+        (company, _), = counts.most_common(1)
+        return company
+
+
+def count_top_msk_companies(message_matches):
+    counts = Counter()
+    for message, matches in message_matches:
+        city = matches_city(matches)
+        if city != MSK:
+            continue
+
+        company = matches_company(matches)
+        if company:
+            counts[company] += 1
+    return counts.most_common(20)
+
+
+def plot_company(message_matches):
+    data = Counter()
+    for message, matches in message_matches:
+        city = matches_city(matches)
+        if city != MSK:
+            continue
+
+        company = matches_company(matches)
+        if not company:
+            company = UNKNOWN
+
+        data[message.datetime.date(), company] += 1
+
+    table = pd.Series(data)
+    table = table.unstack()
+    table.index = pd.to_datetime(table.index)
+    table = table.resample('M').sum()
+    table = drop_last_month(table)
+
+    unknown = table.pop(UNKNOWN)
+    top = table.sum().sort_values(ascending=False).head(9)
+
+    other = table[[_ for _ in table.columns if _ not in top]]
+    other = other.sum(axis='columns')
+
+    table = table[top.index]
+    table[OTHER] = other
+    table[UNKNOWN] = unknown
+
+    fig, ax = plt.subplots()
+    table.plot(kind='bar', stacked=True, width=1, ax=ax)
+
+    ax.set_ylabel('# вакансий / месяц, Москва')
+    patch_bar_year_ticks(ax)
+    patch_legend(ax)

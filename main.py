@@ -1515,6 +1515,10 @@ def plot_company(message_matches):
     table = table[top.index]
     table[OTHER] = other
     table[UNKNOWN] = unknown
+    table = table.rename(columns={
+        UNKNOWN: 'Не распарсилось',
+        OTHER: 'Другие'
+    })
 
     fig, ax = plt.subplots()
     table.plot(kind='bar', stacked=True, width=1, ax=ax)

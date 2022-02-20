@@ -8,3 +8,6 @@ markdown
 html-text
 
 langdetect
+
+yargy
+ipymarkup

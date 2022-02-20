@@ -6,9 +6,15 @@ from typing import Any
 from fnmatch import fnmatch
 from pathlib import Path
 from dataclasses import dataclass
-from collections import Counter
-from datetime import datetime as Datetime
 from itertools import groupby
+from collections import (
+    Counter,
+    defaultdict
+)
+from datetime import (
+    datetime as Datetime,
+    timedelta as Timedelta
+)
 from random import (
     seed,
     sample
@@ -17,6 +23,13 @@ from random import (
 from tqdm.auto import tqdm as log_progress
 
 import pandas as pd
+
+from matplotlib import pyplot as plt
+
+from IPython.display import (
+    display,
+    HTML
+)
 
 import markdown
 import markdown.extensions.nl2br

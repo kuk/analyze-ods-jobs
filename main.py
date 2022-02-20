@@ -8,6 +8,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from collections import Counter
 from datetime import datetime as Datetime
+from itertools import groupby
 from random import (
     seed,
     sample
@@ -146,6 +147,67 @@ def parse_users(items):
             image_url=item['profile']['image_192'],
             is_bot=item['is_bot'],
         )
+
+
+######
+#
+#   EVENT
+#
+####
+
+
+@dataclass
+class Event:
+    channel: str
+    datetime: Datetime
+    user_id: str
+
+
+def group_channels(names):
+    # '_top_science/2020-03-24.json',
+    # '_top_science/2021-04-29.json',
+    # '_top_science/2018-08-17.json',
+
+    def key(name):
+        channel, _ = name.split('/')
+        return channel
+
+    return groupby(names, key=key)
+
+
+# {'client_msg_id': '16f3f85b-3ab4-4869-abc1-c53f0df856a1',
+#  'type': 'message',
+#  'text': 'Зависит от типа данных и возмущениях',
+#  'user': 'UU6LQKYGY',
+#  'ts': '1619713078.203800',
+#  'team': 'T040HKJE3',
+#  'user_team': 'T040HKJE3',
+#  'source_team': 'T040HKJE3',
+#  'user_profile': {'avatar_hash': 'g86892d043c4',
+#   'image_72': 'https://secure.gravatar.com/avatar/86892d043c450f0abe944437ddf4cd1b.jpg?s=72&d=https%3A%2F%2Fa.slack-edge.com%2Fdf10d%2Fimg%2Favatars%2Fava_0012-72.png',
+#   'first_name': '',
+#   'real_name': 'Phdatpp',
+#   'display_name': 'Phdatpp',
+#   'team': 'T040HKJE3',
+#   'name': 'phdatpp',
+#   'is_restricted': False,
+#   'is_ultra_restricted': False},
+#  'blocks': [{'type': 'rich_text',
+#    'block_id': 'Pn7',
+#    'elements': [{'type': 'rich_text_section',
+#      'elements': [{'type': 'text',
+#        'text': 'Зависит от типа данных и возмущениях'}]}]}],
+#  'thread_ts': '1619178511.173800',
+#  'parent_user_id': 'U01KLBNLTFZ'}
+
+
+def parse_events(items, channel):
+    for item in items:
+        if item.get('type') == 'message':
+            datetime = parse_ts(item['ts'])
+            user_id = item.get('user')
+            if user_id:
+                yield Event(channel, datetime, user_id)
 
 
 ########

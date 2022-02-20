@@ -2,6 +2,7 @@
 import re
 import json
 import zipfile
+from typing import Any
 from fnmatch import fnmatch
 from pathlib import Path
 from dataclasses import dataclass
@@ -891,5 +892,107 @@ COMPANIES = {
 COMPANY = morph_pipeline(COMPANIES).interpretation(
     interpretation.normalized().custom(COMPANIES.get)
 )
+
+
+#######
+#
+#   EXTRACTOR
+#
+#####
+
+
+@dataclass
+class Match:
+    start: int
+    stop: int
+    type: str
+    value: Any
+
+
+class const:
+    VILKA = 'vilka'
+    LOCATION = 'location'
+    POSITION = 'position'
+    COMPANY = 'company'
+
+
+class VilkaExtractor:
+    def __init__(self):
+        self.parser = Parser(VILKA)
+
+    def __call__(self, text):
+        matches = self.parser.findall(text)
+        for match in matches:
+            fact = norm_vilka(match.fact)
+            if is_ok_vilka(fact):
+                start, stop = match.span
+                yield Match(start, stop, const.VILKA, fact)
+
+
+class LocationExtractor:
+    def __init__(self):
+        self.parser = Parser(LOCATION)
+
+    def __call__(self, text):
+        matches = self.parser.findall(text)
+        for match in matches:
+            start, stop = match.span
+            yield Match(
+                start, stop,
+                const.LOCATION,
+                match.fact
+            )
+
+
+class PositionExtractor:
+    def __init__(self):
+        self.parser = Parser(POSITION)
+
+    def __call__(self, text):
+        matches = self.parser.findall(text)
+        for match in matches:
+            start, stop = match.span
+            yield Match(
+                start, stop,
+                const.POSITION,
+                match.fact
+            )
+
+
+class CompanyExtractor:
+    def __init__(self):
+        self.parser = Parser(COMPANY)
+
+    def __call__(self, text):
+        for start, stop in find_emails(text):
+            value = text[start:stop]
+            value = email_domain(value)
+            value = norm_domain(value)
+            if value not in GENERIC_EMAIL_DOMAINS:
+                yield Match(start, stop, const.COMPANY, value)
+
+        matches = self.parser.findall(text)
+        for match in matches:
+            start, stop = match.span
+            yield Match(
+                start, stop,
+                const.COMPANY,
+                match.fact
+            )
+
+
+class Extractor:
+    def __init__(self):
+        self.extractors = [
+            VilkaExtractor(),
+            LocationExtractor(),
+            PositionExtractor(),
+            CompanyExtractor(),
+        ]
+
+    def __call__(self, text):
+        for extractor in self.extractors:
+            for match in extractor(text):
+                yield match
 
     )

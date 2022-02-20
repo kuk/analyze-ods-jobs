@@ -236,6 +236,13 @@ def is_vacancy_message(record):
     return (
         not is_before_threads(record)
         and count_words(record.text) > 50
+
+def vacancy_message_query(record):
+    return 'в:#_jobs когда: {date} от:@{user_name}'.format(
+        date=record.datetime.date(),
+        user_name=record.user_name,
+    )
+
 ########
 #
 #   MRKDWN

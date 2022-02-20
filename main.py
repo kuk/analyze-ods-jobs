@@ -75,6 +75,16 @@ def zip_read_texts(path, names, encoding='utf8'):
             yield bytes.decode(encoding)
 
 
+def zip_read_jsons(path, names):
+    for text in zip_read_texts(path, names):
+        yield json.loads(text)
+
+
+def flatten(sequences):
+    for sequence in sequences:
+        yield from sequence
+
+
 #######
 #
 #   USER
@@ -307,6 +317,7 @@ def vacancy_message_query(record):
         date=record.datetime.date(),
         user_name=record.user_name,
     )
+
 
 ########
 #

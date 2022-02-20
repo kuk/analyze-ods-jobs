@@ -1522,3 +1522,93 @@ def plot_company(message_matches):
     ax.set_ylabel('# вакансий / месяц, Москва')
     patch_bar_year_ticks(ax)
     patch_legend(ax)
+
+
+######
+#  COMPANY VILKA
+######
+
+
+def plot_company_vilka(message_matches):
+    COMPANIES = [
+        'sberbank.ru',
+        'yandex-team.ru',
+
+        'ozon.ru',
+
+        'tinkoff.ru',
+        'alfabank.ru',
+        'raiffeisen.ru',
+        'vtb.ru',
+
+        'mts.ru',
+    ]
+    GRADES = [MIDDLE, SENIOR]
+
+    titles = {
+        MIDDLE: 'Мидл',
+        SENIOR: 'Синьёр'
+    }
+    fig, axes = plt.subplots(len(GRADES))
+
+    for GRADE, ax in zip(GRADES, axes.flatten()):
+        data = defaultdict(list)
+        for message, matches in message_matches:
+            if message.datetime.year < 2021:
+                continue
+
+            city = matches_city(matches)
+            if city != MSK:
+                continue
+
+            company = matches_company(matches)
+            if not company:
+                continue
+
+            grades = matches_grades(matches)
+            if not grades:
+                continue
+
+            vilkas = matches_vilkas(matches)
+            if len(grades) != len(vilkas):
+                continue
+
+            for vilka, grade in zip(vilkas, grades):
+                if grade != GRADE:
+                    continue
+
+                if vilka.currency != RUB:
+                    continue
+
+                min, max = vilka.min, vilka.max
+                if vilka.tax == GROSS:
+                    min = minus_ndfl(min)
+                    max = minus_ndfl(max)
+
+                data[company].append([min, max])
+        
+        for y, company in enumerate(reversed(COMPANIES)):
+            intervals = data[company]
+            for min, max in intervals:
+                ax.barh(
+                    y=y,
+                    width=(max - min), left=min,
+                    height=0.8, alpha=0.1,
+                    color='tab:blue'
+                )
+
+        ax.set_title(titles[GRADE])
+
+        ax.set_yticks(range(len(COMPANIES)), reversed(COMPANIES))
+
+        min, max = 25_000, 450_000
+        ticks = range(50_000, max, 50_000)
+        labels = [f'{_ // 1000}k' for _ in ticks]
+        ax.set_xticks(ticks, labels=labels)
+        ax.set_xlim(min, max)
+
+        if GRADE == SENIOR:
+            ax.set_xlabel('Граница вилки, на руки, Москва, 2021')
+
+    fig.set_size_inches(6, 4 * len(GRADES))
+    fig.tight_layout()

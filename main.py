@@ -1294,7 +1294,7 @@ def matches_grades(matches):
     )
 
 
-def plot_grades(message_matches):
+def plot_grade(message_matches):
     data = {}
     for message, matches in message_matches:
         city = matches_city(matches)
@@ -1333,7 +1333,7 @@ def plot_grades(message_matches):
 
 
 #####
-#   VILKA
+#   GRADE VILKA
 ######
 
 
@@ -1359,7 +1359,7 @@ def month_start(date):
     return date - Timedelta(date.day - 1)
 
 
-def plot_vilkas(message_matches):
+def plot_grade_vilka(message_matches):
     first, _ = message_matches[0]
     last, _ = message_matches[-1]
     index = pd.date_range(
@@ -1393,10 +1393,12 @@ def plot_vilkas(message_matches):
                 continue
 
             grades = matches_grades(matches)
-            vilkas = matches_vilkas(matches)
+            if not grades:
+                continue
 
             # Miss common case: "jun/mid/sen: 50-500k"
             # Single vilka multiple grades
+            vilkas = matches_vilkas(matches)
             if len(grades) != len(vilkas):
                 continue
 

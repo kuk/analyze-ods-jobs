@@ -16,6 +16,12 @@ from tqdm.auto import tqdm as log_progress
 
 import pandas as pd
 
+import markdown
+import markdown.extensions.nl2br
+
+import html_text as html_text_
+
+import langdetect
 
 DATA_DIR = Path('data')
 DUMPS_DIR = DATA_DIR / 'dumps'
@@ -128,7 +134,10 @@ def parse_users(items):
 class Message:
     user_name: str
     datetime: Datetime
-    text: str
+    mrkdwn: str
+    html: str = None
+    text: str = None
+    lang: str = None
 
 
 # {'type': 'message',
@@ -167,12 +176,12 @@ def parse_messages(items):
 
         user_name = profile['name']
         datetime = parse_ts(item['ts'])
-        text = item['text']
+        mrkdwn = item['text']
 
         yield Message(
             user_name=user_name,
             datetime=datetime,
-            text=text
+            mrkdwn=mrkdwn
         )
 
 
@@ -203,4 +212,84 @@ def is_vacancy_message(record):
     return (
         not is_before_threads(record)
         and count_words(record.text) > 50
+########
+#
+#   MRKDWN
+#
+######
+
+
+def mrkdwn_html(source):
+    # Slack own Markdown flaivour
+    # https://api.slack.com/reference/surfaces/formatting
+    # https://stackoverflow.com/questions/55816333/does-slack-support-markdown-tables
+
+    # DONE Treat new lines as <br>
+    # TODO User mention <@U04DXFZ2G>
+    # TODO Named links http://jobs.dbrain.io|jobs.dbrain.io
+    # TODO Treat *...* as bold
+    # TODO Support ~...~, ```...```
+
+    return markdown.markdown(
+        source,
+        extensions=[
+            markdown.extensions.nl2br.Nl2BrExtension()
+        ]
+    )
+
+
+#######
+#
+#   HTML
+#
+########
+
+
+def show_html(html):
+    display(HTML(html))
+
+
+def html_text(html):
+    return html_text_.extract_text(html)
+
+
+#######
+#
+#  LANG
+#
+######
+
+
+RU = 'ru'
+EN = 'en'
+
+
+def text_lang(text):
+    for result in langdetect.detect_langs(text):
+        if result.prob > 0.95 and result.lang in (RU, EN):
+            return result.lang
+
+
+#######
+#
+#   NORM TEXT
+#
+######
+
+
+def trans_table(source, target):
+    return {
+        ord(a): ord(b)
+        for a, b in zip(source, target)
+    }
+
+
+DASH_TRANS = trans_table(
+    '‑–—−',
+    '----'
+)
+
+
+def norm_text(text):
+    return text.translate(DASH_TRANS)
     )

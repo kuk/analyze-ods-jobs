@@ -5,3 +5,6 @@ pandas
 matplotlib
 
 markdown
+html-text
+
+langdetect

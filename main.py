@@ -1155,7 +1155,7 @@ def plot_events(events):
         OTHER: 'Другие'
     })
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(facecolor='white')
     table.plot(kind='bar', stacked=True, width=1, ax=ax)
 
     patch_bar_year_ticks(ax)
@@ -1223,7 +1223,7 @@ def plot_city(message_matches):
         MSK: 'Москва'
     })
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(facecolor='white')
     table.plot(kind='bar', stacked=True, width=1, ax=ax)
 
     ax.set_ylabel('# вакансий / месяц')
@@ -1260,7 +1260,7 @@ def plot_remote(message_matches):
         True: 'Упоминается удалёнка',
     })
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(facecolor='white')
     table.plot(kind='bar', stacked=True, width=1, ax=ax)
 
     ax.set_ylabel('# вакансий / месяц')
@@ -1324,7 +1324,7 @@ def plot_grade(message_matches):
 
     })
     
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(facecolor='white')
     table.plot(kind='bar', stacked=True, width=1, ax=ax)
 
     ax.set_ylabel('# вакансий / месяц, Москва')
@@ -1383,7 +1383,7 @@ def plot_grade_vilka(message_matches):
         MIDDLE: 'Мидл',
         SENIOR: 'Синьёр'
     }
-    fig, axes = plt.subplots(1, len(GRADES))
+    fig, axes = plt.subplots(1, len(GRADES), facecolor='white')
 
     for GRADE, ax in zip(GRADES, axes.flatten()):
         data = defaultdict(list)
@@ -1522,7 +1522,7 @@ def plot_company(message_matches):
         OTHER: 'Другие'
     })
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(facecolor='white')
     table.plot(kind='bar', stacked=True, width=1, ax=ax)
 
     ax.set_ylabel('# вакансий / месяц, Москва')
@@ -1555,7 +1555,7 @@ def plot_company_vilka(message_matches):
         MIDDLE: 'Мидл',
         SENIOR: 'Синьёр'
     }
-    fig, axes = plt.subplots(len(GRADES))
+    fig, axes = plt.subplots(len(GRADES), facecolor='white')
 
     for GRADE, ax in zip(GRADES, axes.flatten()):
         data = defaultdict(list)
